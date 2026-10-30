@@ -1,0 +1,7 @@
+Product_ID,Forecast_Month,Forecast_Units,Method,Alpha
+PDG,2026-01-01,376.67,Moving Average (3 months),
+PDG,2026-02-01,376.67,Moving Average (3 months),
+PDG,2026-03-01,376.67,Moving Average (3 months),
+PLG,2026-01-01,561.67,Moving Average (3 months),
+PLG,2026-02-01,561.67,Moving Average (3 months),
+PLG,2026-03-01,561.67,Moving Average (3 months),
