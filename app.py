@@ -23,6 +23,38 @@ except Exception as error:
     st.error(f"Could not load Excel data: {error}")
     st.stop()
 
+# Open purchase orders
+open_purchase_orders = data["open_purchase_orders"].copy()
+
+st.header("Open Purchase Orders")
+
+st.write(
+    "Purchase orders already placed with suppliers "
+    "that are waiting to be received."
+)
+
+st.dataframe(
+    open_purchase_orders,
+    hide_index=True,
+    use_container_width=True
+)
+
+open_orders_count = (
+    open_purchase_orders["Status"].str.strip().str.upper() == "OPEN"
+).sum()
+
+received_orders_count = (
+    open_purchase_orders["Status"].str.strip().str.upper() == "RECEIVED"
+).sum()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric("Open Purchase Orders", int(open_orders_count))
+
+with col2:
+    st.metric("Received Purchase Orders", int(received_orders_count))
+
 # Sidebar controls
 st.sidebar.header("Planning Parameters")
 
@@ -134,6 +166,7 @@ else:
 
 st.write(f"Selected scenario: **{scenario}**")
 
+
 # Calculate MPS and MRP
 try:
     mps = mrp_engine.build_mps(
@@ -147,7 +180,8 @@ try:
         inventory,
         data["tblPurchasing"],
         planning_start=str(planning_start),
-        evaluation_date=str(evaluation_date)
+        evaluation_date=str(evaluation_date),
+        open_purchase_orders_df=open_purchase_orders
     )
 
 except Exception as error:
@@ -174,14 +208,17 @@ for scenario_name, multiplier in scenarios.items():
         inventory
     )
 
+    
     test_mrp = mrp_engine.build_mrp(
         test_mps,
         data["tblBOM"],
         inventory,
         data["tblPurchasing"],
         planning_start=str(planning_start),
-        evaluation_date=str(evaluation_date)
+        evaluation_date=str(evaluation_date),
+        open_purchase_orders_df=open_purchase_orders
     )
+
 
     scenario_results.append({
         "Scenario": scenario_name,
