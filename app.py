@@ -1,4 +1,4 @@
-
+import plotly.express as px
 import streamlit as st
 import pandas as pd
 import mrp_engine
@@ -195,6 +195,314 @@ except Exception as error:
     st.error(f"Calculation error: {error}")
     st.stop()
 
+# Main Dashboard
+st.header("Production Planning Dashboard")
+
+# KPI calculations
+total_forecast = edited_forecast["Forecast_Units"].sum()
+
+total_products = mps["Product_ID"].nunique()
+
+planning_months = mps["Month"].nunique()
+
+total_components = data["tblBOM"]["Component_ID"].nunique()
+
+# KPI layout
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric(
+        "Total Forecast Demand",
+        f"{total_forecast:,.2f}"
+    )
+
+with col2:
+    st.metric(
+        "Products",
+        total_products
+    )
+
+with col3:
+    st.metric(
+        "Planning Horizon",
+        f"{planning_months} Months"
+    )
+
+with col4:
+    st.metric("Components", total_components)
+
+# Total Estimated Purchase Cost
+total_purchase_cost = mrp["Estimated_Purchase_Cost"].sum()
+
+st.metric(
+    "Total Estimated Purchase Cost",
+    f"${total_purchase_cost:,.2f}"
+)
+# Monthly Purchase Cost Chart
+st.subheader("Estimated Purchase Cost by Month")
+
+monthly_purchase_cost = (
+    mrp.groupby("Month", as_index=False)["Estimated_Purchase_Cost"]
+    .sum()
+)
+
+cost_chart = px.bar(
+    monthly_purchase_cost,
+    x="Month",
+    y="Estimated_Purchase_Cost",
+    title="Monthly Estimated Purchase Cost",
+    labels={
+        "Month": "Month",
+        "Estimated_Purchase_Cost": "Estimated Cost ($)"
+    },
+    text_auto=",.2f"
+)
+
+cost_chart.update_traces(
+    textposition="outside",
+    hovertemplate="Month: %{x}<br>Cost: $%{y:,.2f}<extra></extra>"
+)
+
+st.plotly_chart(cost_chart, use_container_width=True)
+st.divider()
+# Demand Forecast Chart
+st.subheader("Demand Forecast by Product")
+
+forecast_chart = edited_forecast.copy()
+
+forecast_chart["Forecast_Month"] = (
+    forecast_chart["Forecast_Month"].dt.strftime("%b %Y")
+)
+
+forecast_pivot = forecast_chart.pivot(
+    index="Forecast_Month",
+    columns="Product_ID",
+    values="Forecast_Units"
+)
+
+st.bar_chart(
+    forecast_pivot,
+    y_label="Forecast Units",
+    x_label="Month"
+)
+# Bill of Materials
+with st.expander("3. Bill of Materials", expanded=False):
+
+    st.write(
+        "The BOM shows which components are required "
+        "to manufacture each finished product."
+    )
+
+    bom_display = data["tblBOM"].copy()
+
+    st.dataframe(
+        bom_display,
+        hide_index=True,
+        width="stretch"
+    )
+# Gross Requirements Breakdown
+with st.expander("4. Gross Requirements Breakdown", expanded=False):
+
+    gross_requirements = mps.merge(
+        bom_display,
+        on="Product_ID",
+        how="left"
+    )
+
+    gross_requirements["Gross_Requirement"] = (
+        gross_requirements["Planned_Production"]
+        * gross_requirements["Quantity_Per_Unit"]
+    )
+
+    gross_display = gross_requirements[
+        [
+            "Product_ID",
+            "Month",
+            "Component_ID",
+            "Planned_Production",
+            "Quantity_Per_Unit",
+            "Gross_Requirement"
+        ]
+    ].copy()
+
+    gross_display = gross_display.rename(columns={
+        "Product_ID": "Product",
+        "Month": "Month",
+        "Component_ID": "Component",
+        "Planned_Production": "Planned Production",
+        "Quantity_Per_Unit": "Qty per Unit",
+        "Gross_Requirement": "Gross Requirement"
+    })
+
+    st.dataframe(
+        gross_display.style.format({
+            "Planned Production": "{:,.0f}",
+            "Qty per Unit": "{:,.0f}",
+            "Gross Requirement": "{:,.0f}"
+        }),
+        hide_index=True,
+        width="stretch"
+    )
+# Consolidated Component Requirements
+with st.expander("5. Consolidated Component Requirements", expanded=False):
+
+    consolidated_requirements = (
+        gross_display
+        .groupby(["Month", "Component"], as_index=False)
+        ["Gross Requirement"]
+        .sum()
+    )
+
+    st.dataframe(
+        consolidated_requirements.style.format({
+            "Gross Requirement": "{:,.0f}"
+        }),
+        hide_index=True,
+        width="stretch"
+    )
+
+    # Component Requirements Chart
+st.subheader("Gross Requirements by Component")
+
+component_chart = px.bar(
+    consolidated_requirements,
+    x="Component",
+    y="Gross Requirement",
+    color="Month",
+    barmode="group",
+    title="Monthly Component Requirements",
+    labels={
+        "Component": "Component",
+        "Gross Requirement": "Required Units",
+        "Month": "Month"
+    },
+    text_auto=True
+)
+
+st.plotly_chart(
+    component_chart,
+    use_container_width=True
+)
+# Net Requirements Breakdown
+with st.expander("6. Net Requirements Breakdown", expanded=False):
+
+    net_display = mrp[
+        [
+            "Component_ID",
+            "Month",
+            "Gross_Requirements",
+            "Safety_Stock",
+            "Beginning_Inventory",
+            "Open_PO_Receipts",
+            "Net_Requirements"
+        ]
+    ].copy()
+
+    net_display = net_display.rename(columns={
+        "Component_ID": "Component",
+        "Month": "Month",
+        "Gross_Requirements": "Gross Requirements",
+        "Safety_Stock": "Safety Stock",
+        "Beginning_Inventory": "Beginning Inventory",
+        "Open_PO_Receipts": "Open PO Receipts",
+        "Net_Requirements": "Net Requirements"
+    })
+
+    st.dataframe(
+        net_display.style.format({
+            "Gross Requirements": "{:,.0f}",
+            "Safety Stock": "{:,.0f}",
+            "Beginning Inventory": "{:,.0f}",
+            "Open PO Receipts": "{:,.0f}",
+            "Net Requirements": "{:,.0f}"
+        }),
+        hide_index=True,
+        width="stretch"
+    )
+
+    # Net Requirements Chart
+    st.subheader("Net Requirements by Component")
+
+    net_chart = px.bar(
+        net_display,
+        x="Component",
+        y="Net Requirements",
+        color="Month",
+        barmode="group",
+        title="Monthly Net Component Requirements",
+        labels={
+            "Component": "Component",
+            "Net Requirements": "Required Units",
+            "Month": "Month"
+        },
+        text_auto=True
+    )
+
+    st.plotly_chart(
+        net_chart,
+        use_container_width=True
+    )
+# Purchase Recommendations
+with st.expander("7. Purchase Recommendations", expanded=False):
+
+    purchase_display = mrp[
+        [
+            "Component_ID",
+            "Month",
+            "Planned_Order_Receipt",
+            "Planned_Order_Release_Date",
+            "Estimated_Purchase_Cost",
+            "Order_Status"
+        ]
+    ].copy()
+
+    purchase_display = purchase_display.rename(columns={
+        "Component_ID": "Component",
+        "Month": "Required Month",
+        "Planned_Order_Receipt": "Recommended Order Quantity",
+        "Planned_Order_Release_Date": "Order Release Date",
+        "Estimated_Purchase_Cost": "Estimated Cost",
+        "Order_Status": "Status"
+    })
+
+    st.dataframe(
+        purchase_display.style.format({
+            "Recommended Order Quantity": "{:,.0f}",
+            "Estimated Cost": "${:,.2f}"
+        }),
+        hide_index=True,
+        width="stretch"
+    )
+        # Purchase Cost by Component
+    st.subheader("Purchase Cost by Component")
+
+    component_purchase_cost = (
+        mrp.groupby("Component_ID", as_index=False)["Estimated_Purchase_Cost"]
+        .sum()
+        .sort_values("Estimated_Purchase_Cost", ascending=False)
+    )
+
+    component_cost_chart = px.bar(
+        component_purchase_cost,
+        x="Component_ID",
+        y="Estimated_Purchase_Cost",
+        title="Total Purchase Cost by Component",
+        labels={
+            "Component_ID": "Component",
+            "Estimated_Purchase_Cost": "Estimated Cost ($)"
+        },
+        text_auto=",.2f"
+    )
+
+    component_cost_chart.update_traces(
+        textposition="outside",
+        hovertemplate="Component: %{x}<br>Cost: $%{y:,.2f}<extra></extra>"
+    )
+
+    st.plotly_chart(
+        component_cost_chart,
+        use_container_width=True
+    )
 # Compare all demand scenarios
 st.header("Scenario Comparison")
 st.caption(

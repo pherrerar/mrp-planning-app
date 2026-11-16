@@ -1,7 +1,12 @@
-
+from mrp_engine import (
+    build_mps,
+    build_mrp,
+    distribute_mps_to_weeks
+)
 from pathlib import Path
 from openpyxl import load_workbook
 import pandas as pd
+
 
 # 1. Locate the Excel file
 PROJECT_FOLDER = Path(__file__).parent
@@ -667,7 +672,118 @@ output_file = output_folder / "master_production_schedule.csv"
 mps_df.to_csv(output_file, index=False)
 
 print(f"\nMPS saved to: {output_file}")
+
+# STEP 9: MPS VALIDATION
+print("\nMPS VALIDATION")
+
+mps_validation = mps_df.copy()
+
+mps_validation["Calculated_Ending_Inventory"] = (
+    mps_validation["Beginning_Inventory"]
+    + mps_validation["Planned_Production"]
+    - mps_validation["Forecast_Demand"]
+)
+
+mps_validation["Inventory_Check"] = (
+    mps_validation["Ending_Inventory"]
+    == mps_validation["Calculated_Ending_Inventory"]
+)
+
+mps_validation["Safety_Stock_Check"] = (
+    mps_validation["Ending_Inventory"]
+    >= mps_validation["Safety_Stock"]
+)
+
+print(
+    mps_validation[
+        [
+            "Product_ID",
+            "Month",
+            "Forecast_Demand",
+            "Beginning_Inventory",
+            "Planned_Production",
+            "Ending_Inventory",
+            "Inventory_Check",
+            "Safety_Stock_Check"
+        ]
+    ].to_string(index=False)
+)
+
+print("\nMPS INVENTORY CHECK:")
+print("All inventory calculations correct:",
+      mps_validation["Inventory_Check"].all())
+
+print("All safety stock requirements met:",
+      mps_validation["Safety_Stock_Check"].all())
+
 print("\nMPS completed successfully!")
+
+# STEP 9.1: DISTRIBUTE MONTHLY PRODUCTION INTO CALENDAR WEEKS
+
+weekly_mps = distribute_mps_to_weeks(mps_df)
+weekly_mps = weekly_mps.sort_values(
+    ["Product_ID", "Month", "Week_Start"]
+).reset_index(drop=True)
+print("\nWEEKLY PRODUCTION DISTRIBUTION:")
+print(weekly_mps.to_string(index=False))
+
+# Validate that weekly production matches monthly production
+weekly_validation = (
+    weekly_mps.groupby(["Product_ID", "Month"])["Planned_Production"]
+    .sum()
+    .reset_index()
+)
+
+monthly_validation = mps_df[
+    ["Product_ID", "Month", "Planned_Production"]
+].copy()
+
+validation = monthly_validation.merge(
+    weekly_validation,
+    on=["Product_ID", "Month"],
+    suffixes=("_Monthly", "_Weekly")
+)
+
+print("\nMONTHLY VS WEEKLY VALIDATION:")
+print(validation.to_string(index=False))
+
+# Save weekly production schedule
+weekly_file = output_folder / "weekly_production_schedule.csv"
+weekly_mps.to_csv(weekly_file, index=False)
+
+print(f"\nWeekly MPS saved to: {weekly_file}")
+# STEP 9.2: CONSOLIDATE WEEKLY PRODUCTION
+
+weekly_consolidated = (
+    weekly_mps.groupby(
+        ["Product_ID", "Calendar_Week", "Week_Start", "Week_End"],
+        as_index=False
+    )["Planned_Production"]
+    .sum()
+    .sort_values(
+        ["Product_ID", "Week_Start"]
+    )
+    .reset_index(drop=True)
+)
+
+
+print("\nCONSOLIDATED WEEKLY PRODUCTION:")
+print(weekly_consolidated.to_string(index=False))
+
+# Save consolidated weekly production
+weekly_consolidated_file = (
+    output_folder / "weekly_production_consolidated.csv"
+)
+
+weekly_consolidated.to_csv(
+    weekly_consolidated_file,
+    index=False
+)
+
+print(
+    f"\nConsolidated weekly MPS saved to: "
+    f"{weekly_consolidated_file}"
+)
 
 # STEP 10: MATERIAL REQUIREMENTS PLANNING (MRP)
 
@@ -681,10 +797,36 @@ mps_file = output_folder / "master_production_schedule.csv"
 mps_df = pd.read_csv(mps_file)
 mps_df["Month"] = pd.to_datetime(mps_df["Month"])
 
-# 2. Load the BOM, inventory, and purchasing data
+# 2. Load the BOM, inventory, purchasing data,
+# and existing purchase orders
+
 bom = data_tables["tblBOM"].copy()
 inventory = data_tables["tblInventory"].copy()
 purchasing = data_tables["tblPurchasing"].copy()
+
+po_file = PROJECT_FOLDER / "open_purchase_orders.csv"
+open_purchase_orders = pd.read_csv(
+    po_file,
+    sep="\t"
+)
+
+# Convert purchase order dates
+open_purchase_orders["Order_Date"] = pd.to_datetime(
+    open_purchase_orders["Order_Date"]
+)
+
+open_purchase_orders["Expected_Arrival_Date"] = pd.to_datetime(
+    open_purchase_orders["Expected_Arrival_Date"]
+)
+
+# Convert order quantities
+open_purchase_orders["Order_Quantity"] = pd.to_numeric(
+    open_purchase_orders["Order_Quantity"],
+    errors="raise"
+)
+
+print("\nExisting Purchase Orders:")
+print(open_purchase_orders.to_string(index=False))
 
 # Convert numeric columns
 bom["Quantity_Per_Unit"] = pd.to_numeric(
@@ -747,6 +889,7 @@ mrp_rows = []
 components = sorted({key[0] for key in gross_requirements})
 months = sorted(mps_df["Month"].unique())
 
+
 # Planning settings for this historical simulation
 planning_start = pd.Timestamp("2026-01-01")
 evaluation_date = pd.Timestamp("2025-12-01")
@@ -756,6 +899,22 @@ for component_id in components:
     purchasing_data = purchasing_lookup[component_id]
 
     projected_inventory = int(component_inventory["Initial_Stock"])
+
+        # Include purchase orders received or expected before planning starts
+    received_before_start = open_purchase_orders[
+        (open_purchase_orders["Component_ID"] == component_id)
+        & (
+            open_purchase_orders["Status"].str.strip().str.upper().isin(
+                ["RECEIVED", "OPEN"]
+            )
+        )
+        & (open_purchase_orders["Expected_Arrival_Date"] < planning_start)
+    ]
+
+    projected_inventory += int(
+        received_before_start["Order_Quantity"].sum()
+    )
+
     safety_stock = int(component_inventory["Safety_Stock"])
     unit_cost = float(purchasing_data["Unit_Cost"])
     lead_time_weeks = int(purchasing_data["Lead_Time_Weeks"])
@@ -763,16 +922,33 @@ for component_id in components:
 
     for month_value in months:
         month = pd.Timestamp(month_value)
+
         gross_qty = gross_requirements.get(
             (component_id, month), 0
         )
 
         beginning_inventory = projected_inventory
 
+        # Find open purchase orders arriving during this month
+        month_end = month + pd.offsets.MonthEnd(0)
+
+        open_po_receipts = open_purchase_orders[
+            (open_purchase_orders["Component_ID"] == component_id)
+            & (open_purchase_orders["Status"].str.strip().str.upper() == "OPEN")
+            & (open_purchase_orders["Expected_Arrival_Date"] >= month)
+            & (open_purchase_orders["Expected_Arrival_Date"] <= month_end)
+        ]
+
+        open_po_quantity = int(
+            open_po_receipts["Order_Quantity"].sum()
+        )
+
         # Protect safety stock after meeting gross requirements
         net_requirement = max(
             0,
-            gross_qty + safety_stock - beginning_inventory
+            gross_qty + safety_stock
+            - beginning_inventory
+            - open_po_quantity
         )
 
         if lot_rule == "L4L":
@@ -784,10 +960,12 @@ for component_id in components:
             )
 
         ending_inventory = (
-            beginning_inventory + planned_receipt - gross_qty
+            beginning_inventory
+            + open_po_quantity
+            + planned_receipt
+            - gross_qty
         )
 
-        
         # Calculate the required order release date
         if planned_receipt > 0:
             planned_release_date = (
@@ -815,6 +993,7 @@ for component_id in components:
             "Month": month,
             "Gross_Requirements": gross_qty,
             "Beginning_Inventory": beginning_inventory,
+            "Open_PO_Receipts": open_po_quantity,
             "Safety_Stock": safety_stock,
             "Net_Requirements": net_requirement,
             "Planned_Order_Receipt": planned_receipt,

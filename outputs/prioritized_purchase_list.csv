@@ -1,0 +1,28 @@
+Component_ID,Month,Net_Requirements,Planned_Order_Receipt,Planned_Order_Release_Date,Lead_Time_Weeks,Unit_Cost,Estimated_Purchase_Cost,Order_Status
+ECU-01,2026-01-01,344,344,2025-12-04,4,30.0,10320.0,Release before planning horizon
+ACT-D,2026-01-01,334,334,2025-12-11,3,40.0,13360.0,Release before planning horizon
+ACT-L,2026-01-01,594,594,2025-12-11,3,45.0,26730.0,Release before planning horizon
+HAR-D,2026-01-01,292,292,2025-12-18,2,10.0,2920.0,Release before planning horizon
+HAR-L,2026-01-01,447,447,2025-12-18,2,12.0,5364.0,Release before planning horizon
+LAT-D,2026-01-01,292,292,2025-12-18,2,16.0,4672.0,Release before planning horizon
+LAT-L,2026-01-01,447,447,2025-12-18,2,18.0,8046.0,Release before planning horizon
+BRK-D,2026-01-01,292,292,2025-12-25,1,7.0,2044.0,Release before planning horizon
+BRK-L,2026-01-01,267,267,2025-12-25,1,8.0,2136.0,Release before planning horizon
+ECU-01,2026-02-01,939,939,2026-01-04,4,30.0,28170.0,Planned order
+ACT-D,2026-02-01,754,754,2026-01-11,3,40.0,30160.0,Planned order
+ACT-L,2026-02-01,1124,1124,2026-01-11,3,45.0,50580.0,Planned order
+HAR-D,2026-02-01,377,377,2026-01-18,2,10.0,3770.0,Planned order
+HAR-L,2026-02-01,362,362,2026-01-18,2,12.0,4344.0,Planned order
+LAT-D,2026-02-01,227,227,2026-01-18,2,16.0,3632.0,Planned order
+LAT-L,2026-02-01,562,562,2026-01-18,2,18.0,10116.0,Planned order
+BRK-D,2026-02-01,377,377,2026-01-25,1,7.0,2639.0,Planned order
+BRK-L,2026-02-01,562,562,2026-01-25,1,8.0,4496.0,Planned order
+ECU-01,2026-03-01,939,939,2026-02-01,4,30.0,28170.0,Planned order
+ACT-D,2026-03-01,754,754,2026-02-08,3,40.0,30160.0,Planned order
+ACT-L,2026-03-01,1124,1124,2026-02-08,3,45.0,50580.0,Planned order
+HAR-D,2026-03-01,377,377,2026-02-15,2,10.0,3770.0,Planned order
+HAR-L,2026-03-01,562,562,2026-02-15,2,12.0,6744.0,Planned order
+LAT-D,2026-03-01,377,377,2026-02-15,2,16.0,6032.0,Planned order
+LAT-L,2026-03-01,562,562,2026-02-15,2,18.0,10116.0,Planned order
+BRK-D,2026-03-01,377,377,2026-02-22,1,7.0,2639.0,Planned order
+BRK-L,2026-03-01,562,562,2026-02-22,1,8.0,4496.0,Planned order

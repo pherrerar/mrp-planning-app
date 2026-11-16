@@ -1,0 +1,10 @@
+Component_ID,Net_Requirement,Unit_Cost,Lead_Time_Weeks,Lot_Sizing_Rule,Need_Week,Order_Release_Week,Order_Status,Estimated_Purchase_Cost
+ECU-01,50,30,4,L4L,4,0,Order now / past due,1500
+ACT-D,40,40,3,L4L,4,1,Release in week 1,1600
+ACT-L,50,45,3,L4L,4,1,Release in week 1,2250
+HAR-D,20,10,2,L4L,4,2,Release in week 2,200
+HAR-L,25,12,2,L4L,4,2,Release in week 2,300
+LAT-D,20,16,2,L4L,4,2,Release in week 2,320
+LAT-L,25,18,2,L4L,4,2,Release in week 2,450
+BRK-L,25,8,1,L4L,4,3,Release in week 3,200
+BRK-D,20,7,1,L4L,4,3,Release in week 3,140

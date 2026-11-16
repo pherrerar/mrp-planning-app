@@ -1,0 +1,10 @@
+Component_ID,Gross_Requirement,Initial_Stock,Safety_Stock,Available_Stock_After_Safety,Net_Requirement
+ACT-D,160,160,40,120,40
+ACT-L,200,200,50,150,50
+BRK-D,80,80,20,60,20
+BRK-L,100,100,25,75,25
+ECU-01,180,180,50,130,50
+HAR-D,80,80,20,60,20
+HAR-L,100,100,25,75,25
+LAT-D,80,80,20,60,20
+LAT-L,100,100,25,75,25

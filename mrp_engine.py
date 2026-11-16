@@ -186,6 +186,91 @@ def build_mps(forecast_df, inventory_df):
 # 3. BUILD THE MATERIAL REQUIREMENTS PLAN (MRP)
 # --------------------------------------------------
 
+def distribute_mps_to_weeks(mps_df):
+
+    weekly_rows = []
+
+    for _, row in mps_df.iterrows():
+
+        month_start = pd.Timestamp(row["Month"]).to_period("M").start_time
+        month_end = month_start + pd.offsets.MonthEnd(0)
+
+        monthly_production = int(row["Planned_Production"])
+
+        # Group the days of the month by ISO calendar week.
+        week_groups = {}
+
+        for day in pd.date_range(month_start, month_end):
+
+            iso_year, iso_week, _ = day.isocalendar()
+
+            week_start = day - pd.Timedelta(days=day.weekday())
+            week_end = week_start + pd.Timedelta(days=6)
+
+            key = (iso_year, iso_week)
+
+            if key not in week_groups:
+                week_groups[key] = {
+                    "Week_Start": week_start,
+                    "Week_End": week_end,
+                    "Days_In_Month": 0
+                }
+
+            week_groups[key]["Days_In_Month"] += 1
+
+        # Calculate proportional weekly quantities.
+        weeks = list(week_groups.values())
+        days_in_month = sum(w["Days_In_Month"] for w in weeks)
+
+        allocations = []
+
+        for week in weeks:
+
+            exact_quantity = (
+                monthly_production
+                * week["Days_In_Month"]
+                / days_in_month
+            )
+
+            allocations.append({
+                **week,
+                "Exact_Quantity": exact_quantity,
+                "Weekly_Production": int(exact_quantity)
+            })
+
+        # Distribute remaining units without losing production.
+        remaining_units = (
+            monthly_production
+            - sum(w["Weekly_Production"] for w in allocations)
+        )
+
+        allocations.sort(
+            key=lambda w: (
+                -(w["Exact_Quantity"] - w["Weekly_Production"]),
+                w["Week_Start"]
+            )
+        )
+
+        for i in range(remaining_units):
+            allocations[i]["Weekly_Production"] += 1
+
+        # Save weekly production.
+        for week in allocations:
+
+            iso_year, iso_week, _ = week["Week_Start"].isocalendar()
+
+            weekly_rows.append({
+                "Product_ID": row["Product_ID"],
+                "Month": month_start,
+                "Week_Start": week["Week_Start"],
+                "Week_End": week["Week_End"],
+                "Calendar_Week": f"CW{iso_week:02d}-{iso_year}",
+                "Week_Days_In_Month": week["Days_In_Month"],
+                "Planned_Production": week["Weekly_Production"]
+            })
+
+    return pd.DataFrame(weekly_rows)
+
 def build_mrp(
     mps_df,
     bom_df,

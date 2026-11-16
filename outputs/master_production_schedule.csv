@@ -1,0 +1,7 @@
+Product_ID,Month,Forecast_Demand,Beginning_Inventory,Safety_Stock,Planned_Production,Ending_Inventory
+PDG,2026-01-01,377,40,15,352,15
+PDG,2026-02-01,377,15,15,377,15
+PDG,2026-03-01,377,15,15,377,15
+PLG,2026-01-01,562,60,20,522,20
+PLG,2026-02-01,562,20,20,562,20
+PLG,2026-03-01,562,20,20,562,20
