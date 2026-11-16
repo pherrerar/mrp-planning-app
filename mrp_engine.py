@@ -76,8 +76,10 @@ def load_data():
     finally:
         workbook.close()
 
-    open_purchase_orders = pd.read_csv(OPEN_PO_FILE)
-
+    open_purchase_orders = pd.read_csv(
+    OPEN_PO_FILE,
+    sep="\t"
+)
     data_tables["open_purchase_orders"] = open_purchase_orders
 
     return data_tables
