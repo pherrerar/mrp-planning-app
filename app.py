@@ -24,7 +24,8 @@ except Exception as error:
 
 # Open purchase orders
 open_purchase_orders = data["open_purchase_orders"].copy()
-
+st.write("DEBUG - PO columns:", open_purchase_orders.columns.tolist())
+st.write("DEBUG - PO file path:", mrp_engine.OPEN_PO_FILE)
 st.header("Open Purchase Orders")
 
 st.write(
