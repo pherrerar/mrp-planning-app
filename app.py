@@ -13,7 +13,6 @@ st.title("🏭 Material Requirements Planning")
 st.caption("Production planning, inventory control, and purchasing decisions")
 
 # Load Excel data
-@st.cache_data
 def load_project_data():
     return mrp_engine.load_data()
 
