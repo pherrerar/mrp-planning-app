@@ -7,11 +7,12 @@ from openpyxl import load_workbook
 
 
 # --------------------------------------------------
-# 1. LOAD DATA FROM EXCEL
+# 1. LOAD DATA FROM EXCEL AND CSV
 # --------------------------------------------------
 
 PROJECT_FOLDER = Path(__file__).parent
 EXCEL_FILE = PROJECT_FOLDER / "Production_Planning_Input.xlsx"
+OPEN_PO_FILE = PROJECT_FOLDER / "open_purchase_orders.csv"
 
 
 def read_excel_table(workbook, table_name):
@@ -31,6 +32,7 @@ def read_excel_table(workbook, table_name):
             data = values[1:]
 
             df = pd.DataFrame(data, columns=headers)
+
             return df.dropna(how="all")
 
     raise ValueError(
@@ -39,11 +41,16 @@ def read_excel_table(workbook, table_name):
 
 
 def load_data():
-    """Load all Excel tables needed by the MRP model."""
+    """Load all Excel tables and open purchase orders."""
 
     if not EXCEL_FILE.exists():
         raise FileNotFoundError(
             f"Excel file not found: {EXCEL_FILE}"
+        )
+
+    if not OPEN_PO_FILE.exists():
+        raise FileNotFoundError(
+            f"Open purchase orders file not found: {OPEN_PO_FILE}"
         )
 
     table_names = [
@@ -68,6 +75,10 @@ def load_data():
         }
     finally:
         workbook.close()
+
+    open_purchase_orders = pd.read_csv(OPEN_PO_FILE)
+
+    data_tables["open_purchase_orders"] = open_purchase_orders
 
     return data_tables
 
@@ -138,6 +149,7 @@ def build_mps(forecast_df, inventory_df):
         for _, row in group.iterrows():
 
             demand = math.ceil(row["Forecast_Units"])
+
             beginning_inventory = projected_inventory
 
             planned_production = max(
@@ -179,21 +191,38 @@ def build_mrp(
     bom_df,
     inventory_df,
     purchasing_df,
+    open_purchase_orders_df=None,
     planning_start="2026-01-01",
     evaluation_date="2025-12-01",
 ):
     """
     Calculate gross and net material requirements,
-    planned receipts, inventory projections,
-    release dates, and estimated purchase costs.
+    existing purchase order receipts, planned receipts,
+    inventory projections, release dates, and costs.
 
-    The current version supports the L4L lot-sizing rule.
+    The current version supports L4L lot sizing.
     """
+
+    # ----------------------------------------------
+    # 3.1 COPY INPUT DATA
+    # ----------------------------------------------
 
     mps = mps_df.copy()
     bom = bom_df.copy()
     inventory = inventory_df.copy()
     purchasing = purchasing_df.copy()
+
+    if open_purchase_orders_df is None:
+        open_pos = pd.DataFrame()
+    else:
+        open_pos = open_purchase_orders_df.copy()
+
+    planning_start = pd.Timestamp(planning_start)
+    evaluation_date = pd.Timestamp(evaluation_date)
+
+    # ----------------------------------------------
+    # 3.2 VALIDATE AND CONVERT DATA TYPES
+    # ----------------------------------------------
 
     mps["Month"] = pd.to_datetime(mps["Month"])
 
@@ -222,6 +251,71 @@ def build_mrp(
         errors="raise"
     )
 
+    # ----------------------------------------------
+    # 3.3 PREPARE OPEN PURCHASE ORDERS
+    # ----------------------------------------------
+
+    if not open_pos.empty:
+
+        required_po_columns = [
+            "Component_ID",
+            "Expected_Arrival_Date",
+            "Order_Quantity",
+            "Status",
+        ]
+
+        missing_columns = [
+            col for col in required_po_columns
+            if col not in open_pos.columns
+        ]
+
+        if missing_columns:
+            raise ValueError(
+                f"Missing columns in open purchase orders: "
+                f"{missing_columns}"
+            )
+
+        open_pos["Expected_Arrival_Date"] = pd.to_datetime(
+            open_pos["Expected_Arrival_Date"],
+            format="%m/%d/%Y",
+            errors="raise"
+        )
+
+        open_pos["Order_Quantity"] = pd.to_numeric(
+            open_pos["Order_Quantity"],
+            errors="raise"
+        )
+
+        if (open_pos["Order_Quantity"] < 0).any():
+            raise ValueError(
+                "Purchase order quantities cannot be negative."
+            )
+
+        open_pos["Status"] = (
+            open_pos["Status"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
+        open_pos = open_pos[
+            open_pos["Status"].isin(["OPEN", "RECEIVED"])
+        ].copy()
+
+    else:
+        open_pos = pd.DataFrame(
+            columns=[
+                "Component_ID",
+                "Expected_Arrival_Date",
+                "Order_Quantity",
+                "Status",
+            ]
+        )
+
+    # ----------------------------------------------
+    # 3.4 CREATE LOOKUP DICTIONARIES
+    # ----------------------------------------------
+
     inventory_lookup = (
         inventory.set_index("Item_ID").to_dict("index")
     )
@@ -230,14 +324,20 @@ def build_mrp(
         purchasing.set_index("Component_ID").to_dict("index")
     )
 
-    # Calculate gross requirements by component and month.
+    # ----------------------------------------------
+    # 3.5 CALCULATE GROSS REQUIREMENTS
+    # ----------------------------------------------
+
     gross_requirements = {}
 
     for _, plan_row in mps.iterrows():
 
         product_id = plan_row["Product_ID"]
         month = pd.Timestamp(plan_row["Month"])
-        planned_units = int(plan_row["Planned_Production"])
+
+        planned_units = int(
+            plan_row["Planned_Production"]
+        )
 
         product_bom = bom[
             bom["Product_ID"] == product_id
@@ -267,8 +367,53 @@ def build_mrp(
 
     months = sorted(mps["Month"].unique())
 
-    planning_start = pd.Timestamp(planning_start)
-    evaluation_date = pd.Timestamp(evaluation_date)
+    # ----------------------------------------------
+    # 3.6 SEPARATE EXISTING PURCHASE ORDER RECEIPTS
+    # ----------------------------------------------
+
+    po_before_start = {}
+    po_by_month = {}
+
+    for _, po_row in open_pos.iterrows():
+
+        component_id = po_row["Component_ID"]
+
+        arrival_date = pd.Timestamp(
+            po_row["Expected_Arrival_Date"]
+        )
+
+        quantity = int(po_row["Order_Quantity"])
+
+        # Ignore orders that arrived on or before
+        # the evaluation date.
+        if arrival_date <= evaluation_date:
+            continue
+
+        # Orders arriving after evaluation date
+        # but before planning starts.
+        if arrival_date < planning_start:
+
+            po_before_start[component_id] = (
+                po_before_start.get(component_id, 0)
+                + quantity
+            )
+
+        # Orders arriving during the planning horizon.
+        else:
+
+            arrival_month = (
+                arrival_date.to_period("M").to_timestamp()
+            )
+
+            key = (component_id, arrival_month)
+
+            po_by_month[key] = (
+                po_by_month.get(key, 0) + quantity
+            )
+
+    # ----------------------------------------------
+    # 3.7 CALCULATE MRP BY COMPONENT AND MONTH
+    # ----------------------------------------------
 
     mrp_rows = []
 
@@ -285,17 +430,24 @@ def build_mrp(
             )
 
         component_inventory = inventory_lookup[component_id]
+
         purchasing_data = purchasing_lookup[component_id]
 
-        projected_inventory = int(
-            component_inventory["Initial_Stock"]
+        # Initial inventory plus purchase orders
+        # arriving before the planning horizon.
+        projected_inventory = (
+            int(component_inventory["Initial_Stock"])
+            + po_before_start.get(component_id, 0)
         )
 
         safety_stock = int(
             component_inventory["Safety_Stock"]
         )
 
-        unit_cost = float(purchasing_data["Unit_Cost"])
+        unit_cost = float(
+            purchasing_data["Unit_Cost"]
+        )
+
         lead_time_weeks = int(
             purchasing_data["Lead_Time_Weeks"]
         )
@@ -311,6 +463,10 @@ def build_mrp(
                 "This version supports L4L."
             )
 
+        # ------------------------------------------
+        # 3.8 MONTHLY MATERIAL REQUIREMENTS
+        # ------------------------------------------
+
         for month_value in months:
 
             month = pd.Timestamp(month_value)
@@ -322,50 +478,76 @@ def build_mrp(
 
             beginning_inventory = projected_inventory
 
-            net_requirement = max(
-                0,
-                gross_qty + safety_stock - beginning_inventory
+            # Existing purchase orders arriving this month.
+            open_po_receipts = po_by_month.get(
+                (component_id, month),
+                0
             )
 
+            # Net requirements after considering
+            # inventory, safety stock, and existing POs.
+            net_requirement = max(
+                0,
+                gross_qty
+                + safety_stock
+                - beginning_inventory
+                - open_po_receipts
+            )
+
+            # L4L: planned receipt equals net requirement.
             planned_receipt = net_requirement
 
+            # Ending inventory includes existing POs
+            # and newly planned purchase receipts.
             ending_inventory = (
                 beginning_inventory
+                + open_po_receipts
                 + planned_receipt
                 - gross_qty
             )
 
+            # Calculate planned order release date.
             if planned_receipt > 0:
+
                 release_date = (
                     month - pd.Timedelta(
                         weeks=lead_time_weeks
                     )
                 )
+
             else:
                 release_date = pd.NaT
 
+            # Determine order status.
             if planned_receipt == 0:
+
                 order_status = "No order required"
 
             elif release_date < planning_start:
 
                 if release_date < evaluation_date:
+
                     order_status = (
                         "URGENT: release date has passed"
                     )
+
                 else:
+
                     order_status = (
                         "Release before planning horizon"
                     )
 
             else:
+
                 order_status = "Planned order"
 
+            # Save monthly MRP results.
             mrp_rows.append({
                 "Component_ID": component_id,
                 "Month": month,
                 "Gross_Requirements": gross_qty,
                 "Beginning_Inventory": beginning_inventory,
+                "Open_PO_Receipts": open_po_receipts,
                 "Safety_Stock": safety_stock,
                 "Net_Requirements": net_requirement,
                 "Planned_Order_Receipt": planned_receipt,
@@ -380,6 +562,10 @@ def build_mrp(
             })
 
             projected_inventory = ending_inventory
+
+    # ----------------------------------------------
+    # 3.9 RETURN MRP RESULTS
+    # ----------------------------------------------
 
     mrp_df = pd.DataFrame(mrp_rows)
 
