@@ -149,7 +149,7 @@ def build_mps(forecast_df, inventory_df):
         for _, row in group.iterrows():
 
             demand = math.ceil(row["Forecast_Units"])
-
+           
             beginning_inventory = projected_inventory
 
             planned_production = max(

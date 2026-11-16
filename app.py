@@ -107,6 +107,7 @@ if not forecast_path.exists():
     st.stop()
 
 forecast = pd.read_csv(forecast_path)
+forecast["Forecast_Units"] = forecast["Forecast_Units"].round(2)
 forecast["Forecast_Month"] = pd.to_datetime(
     forecast["Forecast_Month"]
 )
@@ -128,16 +129,23 @@ edited_forecast = st.data_editor(
             disabled=True
         ),
         "Forecast_Units": st.column_config.NumberColumn(
-            "Forecast Units",
-            min_value=0,
-            step=10,
-            format="%.2f"
-        )
+    "Forecast Units",
+    min_value=0.00,
+    step=0.01,
+    format="localized"
+)
     },
     disabled=["Product_ID", "Forecast_Month"],
     hide_index=True,
     use_container_width=True,
     key="forecast_editor"
+)
+# Display total forecast demand
+total_forecast_demand = edited_forecast["Forecast_Units"].sum()
+
+st.metric(
+    "Total Forecast Demand",
+    f"{total_forecast_demand:,.2f}"
 )
 
 # Demand scenario analysis
@@ -189,7 +197,10 @@ except Exception as error:
 
 # Compare all demand scenarios
 st.header("Scenario Comparison")
-
+st.caption(
+    "Forecast Demand represents the integer demand used for MPS "
+    "planning. Each monthly forecast is rounded up to a whole unit."
+)
 scenario_results = []
 
 scenarios = {
